@@ -96,13 +96,27 @@ class MemosSyncSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  private async testAndShowStatus(setting: Setting) {
+    setting.setDesc("Testing connection...");
+    try {
+      const syncer = new MemosSyncer(this.app, this.plugin.settings);
+      const name = await syncer.testConnection();
+      setting.setDesc(`Connected as: ${name}`);
+    } catch {
+      setting.setDesc("Connection failed. Check server URL and token.");
+    }
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
+    // --- Connection ---
+    containerEl.createEl("h3", { text: "Connection" });
+
     new Setting(containerEl)
-      .setName("Memos server URL")
-      .setDesc("e.g. https://memo.jmjeong.com")
+      .setName("Server URL")
+      .setDesc("Your Memos server address (e.g. https://memo.example.com)")
       .addText((text) =>
         text
           .setPlaceholder("https://your-memos-server.com")
@@ -113,37 +127,66 @@ class MemosSyncSettingTab extends PluginSettingTab {
           })
       );
 
+    const tokenSetting = new Setting(containerEl)
+      .setName("Access token")
+      .setDesc("Generate in Memos: Settings > Access Tokens");
+
+    let testTimeout: number | null = null;
+    tokenSetting.addText((text) =>
+      text
+        .setPlaceholder("memos_pat_...")
+        .setValue(this.plugin.settings.memosAPIToken)
+        .onChange(async (value) => {
+          this.plugin.settings.memosAPIToken = value.trim();
+          await this.plugin.saveSettings();
+          // Debounced auto-test on token change
+          if (testTimeout) window.clearTimeout(testTimeout);
+          if (value.trim()) {
+            testTimeout = window.setTimeout(() => this.testAndShowStatus(tokenSetting), 800);
+          }
+        })
+    );
+
+    // Run initial test if token is already set
+    if (this.plugin.settings.memosAPIURL && this.plugin.settings.memosAPIToken) {
+      this.testAndShowStatus(tokenSetting);
+    }
+
+    // --- Sync ---
+    containerEl.createEl("h3", { text: "Sync" });
+
     new Setting(containerEl)
-      .setName("API token")
-      .setDesc("Memos access token (Settings > Access Tokens in Memos)")
-      .addText((text) =>
-        text
-          .setPlaceholder("memos_pat_...")
-          .setValue(this.plugin.settings.memosAPIToken)
+      .setName("Auto sync on startup")
+      .setDesc("Automatically sync memos when Obsidian opens")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.autoSyncOnLoad)
           .onChange(async (value) => {
-            this.plugin.settings.memosAPIToken = value.trim();
+            this.plugin.settings.autoSyncOnLoad = value;
             await this.plugin.saveSettings();
           })
       );
 
     new Setting(containerEl)
-      .setName("Test connection")
-      .setDesc("Verify server URL and token")
-      .addButton((button) =>
-        button.setButtonText("Test").onClick(async () => {
-          try {
-            const syncer = new MemosSyncer(this.app, this.plugin.settings);
-            const name = await syncer.testConnection();
-            new Notice(`Connected as: ${name}`);
-          } catch (e) {
-            new Notice(`Connection failed: ${e}`);
-          }
-        })
+      .setName("Sync interval (minutes)")
+      .setDesc("Run sync periodically in the background. Set to 0 to disable.")
+      .addText((text) =>
+        text
+          .setPlaceholder("0")
+          .setValue(String(this.plugin.settings.syncIntervalMinutes))
+          .onChange(async (value) => {
+            const num = parseInt(value, 10);
+            this.plugin.settings.syncIntervalMinutes = isNaN(num) ? 0 : Math.max(0, num);
+            await this.plugin.saveSettings();
+          })
       );
 
+    // --- Daily Notes ---
+    containerEl.createEl("h3", { text: "Daily Notes" });
+
     new Setting(containerEl)
-      .setName("Daily memos header")
-      .setDesc("Section header in daily notes where memos are inserted")
+      .setName("Section header")
+      .setDesc("Memos are inserted under this heading in daily notes (e.g. \"Daily Record\" matches \"## Daily Record\")")
       .addText((text) =>
         text
           .setPlaceholder("Daily Record")
@@ -156,7 +199,7 @@ class MemosSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Attachment folder")
-      .setDesc("Folder for downloaded attachments (relative to vault root)")
+      .setDesc("Where to save downloaded images and files (relative to vault root)")
       .addText((text) =>
         text
           .setPlaceholder("Attachments")
@@ -167,50 +210,29 @@ class MemosSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("Auto sync on load")
-      .setDesc("Sync memos when Obsidian starts")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.autoSyncOnLoad)
-          .onChange(async (value) => {
-            this.plugin.settings.autoSyncOnLoad = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Sync interval (minutes)")
-      .setDesc("Periodic sync interval. 0 to disable.")
-      .addText((text) =>
-        text
-          .setPlaceholder("0")
-          .setValue(String(this.plugin.settings.syncIntervalMinutes))
-          .onChange(async (value) => {
-            const num = parseInt(value, 10);
-            this.plugin.settings.syncIntervalMinutes = isNaN(num) ? 0 : Math.max(0, num);
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // URL Rewrite Rules
-    containerEl.createEl("h3", { text: "URL Rewrite Rules" });
-    containerEl.createEl("p", {
-      text: "Replace URL prefixes in memo content. Useful for R2 CDN rewriting.",
+    // --- Image URL Shortening (collapsible) ---
+    const detailsEl = containerEl.createEl("details");
+    const rules = this.plugin.settings.urlRewriteRules;
+    if (rules.some((r) => r.from)) detailsEl.setAttribute("open", "");
+    detailsEl.createEl("summary", {
+      text: `Image URL shortening (${rules.length} rule${rules.length !== 1 ? "s" : ""})`,
+      cls: "setting-item-name",
+    });
+    detailsEl.createEl("p", {
+      text: "Memos stores images with long storage URLs (e.g. Cloudflare R2 signed URLs). These rules replace the long URL with a shorter public one so images display correctly in Obsidian. Most users don't need to change this.",
       cls: "setting-item-description",
     });
 
-    const rules = this.plugin.settings.urlRewriteRules;
-
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i];
-      const ruleContainer = containerEl.createDiv({ cls: "memos-sync-rule" });
+      const ruleContainer = detailsEl.createDiv({ cls: "memos-sync-rule" });
 
       new Setting(ruleContainer)
-        .setName(`Rule ${i + 1}: From`)
+        .setName("Find")
+        .setDesc("Long URL prefix from Memos storage")
         .addText((text) =>
           text
-            .setPlaceholder("Original URL prefix")
+            .setPlaceholder("https://long-storage-url.com/assets/")
             .setValue(rule.from)
             .onChange(async (value) => {
               rule.from = value;
@@ -219,10 +241,11 @@ class MemosSyncSettingTab extends PluginSettingTab {
         );
 
       new Setting(ruleContainer)
-        .setName(`Rule ${i + 1}: To`)
+        .setName("Replace with")
+        .setDesc("Short public URL")
         .addText((text) =>
           text
-            .setPlaceholder("Replacement URL prefix")
+            .setPlaceholder("https://cdn.example.com/assets/")
             .setValue(rule.to)
             .onChange(async (value) => {
               rule.to = value;
@@ -231,8 +254,8 @@ class MemosSyncSettingTab extends PluginSettingTab {
         );
 
       new Setting(ruleContainer)
-        .setName(`Rule ${i + 1}: Image width`)
-        .setDesc("Added as |width to image alt text. Leave empty to skip.")
+        .setName("Image width")
+        .setDesc("Resize images to this width in Obsidian (e.g. 500)")
         .addText((text) =>
           text
             .setPlaceholder("500")
@@ -256,7 +279,7 @@ class MemosSyncSettingTab extends PluginSettingTab {
       );
     }
 
-    new Setting(containerEl).addButton((button) =>
+    new Setting(detailsEl).addButton((button) =>
       button.setButtonText("Add rule").onClick(async () => {
         rules.push({ from: "", to: "" });
         await this.plugin.saveSettings();
