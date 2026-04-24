@@ -35,7 +35,7 @@ Memos are formatted as list items under the configured heading in your daily not
 
 ### Manual
 
-1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/jmjeong/memos-sync-obsidian/releases)
+1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/jmjeong/obsidian-memos-sync/releases)
 2. Create a folder `memos-sync` in your vault's `.obsidian/plugins/` directory
 3. Copy `main.js` and `manifest.json` into that folder
 4. Restart Obsidian and enable "Memos Sync" in Settings → Community Plugins
@@ -43,8 +43,8 @@ Memos are formatted as list items under the configured heading in your daily not
 ### Build from Source
 
 ```bash
-git clone https://github.com/jmjeong/memos-sync-obsidian.git
-cd memos-sync-obsidian
+git clone https://github.com/jmjeong/obsidian-memos-sync.git
+cd obsidian-memos-sync
 npm install
 npm run build
 ```
