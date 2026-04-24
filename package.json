@@ -1,0 +1,20 @@
+{
+  "name": "memos-sync",
+  "version": "1.0.0",
+  "description": "Sync memos from Memos v0.27.1 to Obsidian daily notes",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "deploy": "node esbuild.config.mjs production && cp main.js manifest.json \"$OBSIDIAN_PLUGIN_DIR\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.21.0",
+    "obsidian": "^1.5.12",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "obsidian-daily-notes-interface": "^0.9.4"
+  }
+}
