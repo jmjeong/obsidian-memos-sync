@@ -160,7 +160,7 @@ function modifyDailyNote(
   originContent: string,
   header: string,
   fetchedRecords: Record<string, string>
-): string | null {
+): { content: string; newCount: number } | null {
   const reg = generateHeaderRegExp(header);
   const regMatch = originContent.match(reg);
 
@@ -186,6 +186,14 @@ function modifyDailyNote(
     }
   }
 
+  // Count new memos (not already in the daily note)
+  let newCount = 0;
+  for (const key of Object.keys(fetchedRecords)) {
+    if (!(key in existedRecords)) {
+      newCount++;
+    }
+  }
+
   // Merge: fetched overwrites existing with same timestamp
   const merged = { ...existedRecords, ...fetchedRecords };
 
@@ -194,7 +202,8 @@ function modifyDailyNote(
     .map(([, content]) => content)
     .join("\n");
 
-  return prefix.trim() + `\n\n${sortedContent}\n\n` + suffix.trim() + "\n";
+  const content = prefix.trim() + `\n\n${sortedContent}\n\n` + suffix.trim() + "\n";
+  return { content, newCount };
 }
 
 // --- Sync orchestrator ---
@@ -228,7 +237,6 @@ export class MemosSyncer {
 
   async sync(forceAll = false): Promise<number> {
     const lastSyncTime = forceAll ? 0 : this.getLastSyncTime();
-    let totalSynced = 0;
     let newestTimestamp = lastSyncTime;
 
     // Group memos by date
@@ -276,7 +284,6 @@ export class MemosSyncer {
         if (memoTs > newestTimestamp) {
           newestTimestamp = memoTs;
         }
-        totalSynced++;
       }
 
       pageToken = resp.nextPageToken;
@@ -286,10 +293,11 @@ export class MemosSyncer {
     // Download attachments
     await this.downloadResources(resourcesToDownload);
 
-    // Write to daily notes
+    // Write to daily notes and count actually new memos
+    let totalSynced = 0;
     const allDailyNotes = getAllDailyNotes();
     for (const [date, records] of Object.entries(memosByDate)) {
-      await this.writeToDailyNote(date, records, allDailyNotes);
+      totalSynced += await this.writeToDailyNote(date, records, allDailyNotes);
     }
 
     if (newestTimestamp > lastSyncTime) {
@@ -303,7 +311,7 @@ export class MemosSyncer {
     date: string,
     records: Record<string, string>,
     allDailyNotes: Record<string, TFile>
-  ): Promise<void> {
+  ): Promise<number> {
     const moment = window.moment(date, "YYYY-MM-DD");
     let dailyNote = getDailyNote(moment, allDailyNotes);
 
@@ -312,24 +320,27 @@ export class MemosSyncer {
         dailyNote = await createDailyNote(moment);
       } catch (e) {
         new Notice(`Failed to create daily note for ${date}: ${e}`);
-        return;
+        return 0;
       }
     }
 
+    let newCount = 0;
     await this.app.vault.process(dailyNote, (content) => {
-      const modified = modifyDailyNote(
+      const result = modifyDailyNote(
         content,
         this.settings.dailyMemosHeader,
         records
       );
-      if (modified === null) {
+      if (result === null) {
         new Notice(
           `Failed to find header "${this.settings.dailyMemosHeader}" in ${date} daily note.`
         );
         return content;
       }
-      return modified;
+      newCount = result.newCount;
+      return result.content;
     });
+    return newCount;
   }
 
   private async downloadResources(resources: Resource[]): Promise<void> {
