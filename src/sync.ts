@@ -258,8 +258,8 @@ export class MemosSyncer {
         const displayTime = memo.displayTime || memo.createTime;
         const memoTs = window.moment(displayTime).unix();
 
-        // Stop if older than last sync (incremental)
-        if (memoTs < lastSyncTime && !forceAll) {
+        // Stop if already synced (incremental)
+        if (memoTs <= lastSyncTime && !forceAll) {
           done = true;
           break;
         }
