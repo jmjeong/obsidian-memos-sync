@@ -49,6 +49,17 @@ export class MemosClient {
     return this.request("/api/v1/memos", params);
   }
 
+  async listMemosByUpdateTime(pageSize: number, pageToken?: string): Promise<ListMemosResponse> {
+    const params: Record<string, string> = {
+      pageSize: String(pageSize),
+      orderBy: "update_time desc",
+    };
+    if (pageToken) {
+      params.pageToken = pageToken;
+    }
+    return this.request("/api/v1/memos", params);
+  }
+
   async fetchResourceBinary(resource: Resource): Promise<ArrayBuffer> {
     const url = `${this.baseUrl}/file/${resource.name}/${resource.filename}`;
     const req: RequestUrlParam = {

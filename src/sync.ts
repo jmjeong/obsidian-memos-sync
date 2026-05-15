@@ -160,7 +160,7 @@ function modifyDailyNote(
   originContent: string,
   header: string,
   fetchedRecords: Record<string, string>
-): { content: string; newCount: number } | null {
+): { content: string; newCount: number; updatedCount: number } | null {
   const reg = generateHeaderRegExp(header);
   const regMatch = originContent.match(reg);
 
@@ -186,11 +186,14 @@ function modifyDailyNote(
     }
   }
 
-  // Count new memos (not already in the daily note)
+  // Count new and updated memos
   let newCount = 0;
-  for (const key of Object.keys(fetchedRecords)) {
+  let updatedCount = 0;
+  for (const [key, value] of Object.entries(fetchedRecords)) {
     if (!(key in existedRecords)) {
       newCount++;
+    } else if (existedRecords[key] !== value) {
+      updatedCount++;
     }
   }
 
@@ -203,7 +206,7 @@ function modifyDailyNote(
     .join("\n");
 
   const content = prefix.trim() + `\n\n${sortedContent}\n\n` + suffix.trim() + "\n";
-  return { content, newCount };
+  return { content, newCount, updatedCount };
 }
 
 // --- Sync orchestrator ---
@@ -235,30 +238,31 @@ export class MemosSyncer {
     return user.displayName || user.username || user.name;
   }
 
-  async sync(forceAll = false): Promise<number> {
-    const lastSyncTime = forceAll ? 0 : this.getLastSyncTime();
+  private async collectMemos(
+    fetcher: (pageSize: number, pageToken?: string) => Promise<import("./types").ListMemosResponse>,
+    lastSyncTime: number,
+    forceAll: boolean,
+    timeField: "displayTime" | "updateTime",
+    memosByDate: Record<string, Record<string, string>>,
+    resourcesToDownload: Resource[]
+  ): Promise<number> {
     let newestTimestamp = lastSyncTime;
-
-    // Group memos by date
-    const memosByDate: Record<string, Record<string, string>> = {};
-    const resourcesToDownload: Resource[] = [];
-
     let pageToken: string | undefined;
     let done = false;
 
     while (!done) {
-      const resp = await this.client.listMemos(50, pageToken);
+      const resp = await fetcher(50, pageToken);
       const memos = resp.memos || [];
       if (!memos.length) break;
 
       for (const memo of memos) {
-        // Skip non-normal memos
         if (memo.state && memo.state !== "NORMAL") continue;
 
-        const displayTime = memo.displayTime || memo.createTime;
-        const memoTs = window.moment(displayTime).unix();
+        const timeValue = timeField === "updateTime"
+          ? memo.updateTime
+          : (memo.displayTime || memo.createTime);
+        const memoTs = window.moment(timeValue).unix();
 
-        // Stop if already synced (incremental)
         if (memoTs <= lastSyncTime && !forceAll) {
           done = true;
           break;
@@ -271,13 +275,10 @@ export class MemosSyncer {
         }
         memosByDate[formatted.date][formatted.timestamp] = formatted.content;
 
-        // Collect resources for download
         const memoResources = memo.resources || memo.attachments || [];
-        if (memoResources.length) {
-          for (const r of memoResources) {
-            if (!r.externalLink) {
-              resourcesToDownload.push(r);
-            }
+        for (const r of memoResources) {
+          if (!r.externalLink) {
+            resourcesToDownload.push(r);
           }
         }
 
@@ -290,28 +291,55 @@ export class MemosSyncer {
       if (!pageToken) break;
     }
 
+    return newestTimestamp;
+  }
+
+  async sync(forceAll = false): Promise<{ newCount: number; updatedCount: number }> {
+    const lastSyncTime = forceAll ? 0 : this.getLastSyncTime();
+
+    const memosByDate: Record<string, Record<string, string>> = {};
+    const resourcesToDownload: Resource[] = [];
+
+    // Pass 1: fetch new memos by displayTime
+    const newestDisplayTime = await this.collectMemos(
+      (ps, pt) => this.client.listMemos(ps, pt),
+      lastSyncTime, forceAll, "displayTime",
+      memosByDate, resourcesToDownload
+    );
+
+    // Pass 2: fetch updated memos by updateTime
+    const newestUpdateTime = await this.collectMemos(
+      (ps, pt) => this.client.listMemosByUpdateTime(ps, pt),
+      lastSyncTime, forceAll, "updateTime",
+      memosByDate, resourcesToDownload
+    );
+
     // Download attachments
     await this.downloadResources(resourcesToDownload);
 
-    // Write to daily notes and count actually new memos
-    let totalSynced = 0;
+    // Write to daily notes
+    let totalNew = 0;
+    let totalUpdated = 0;
     const allDailyNotes = getAllDailyNotes();
     for (const [date, records] of Object.entries(memosByDate)) {
-      totalSynced += await this.writeToDailyNote(date, records, allDailyNotes);
+      const result = await this.writeToDailyNote(date, records, allDailyNotes);
+      totalNew += result.newCount;
+      totalUpdated += result.updatedCount;
     }
 
+    const newestTimestamp = Math.max(newestDisplayTime, newestUpdateTime);
     if (newestTimestamp > lastSyncTime) {
       this.setLastSyncTime(newestTimestamp);
     }
 
-    return totalSynced;
+    return { newCount: totalNew, updatedCount: totalUpdated };
   }
 
   private async writeToDailyNote(
     date: string,
     records: Record<string, string>,
     allDailyNotes: Record<string, TFile>
-  ): Promise<number> {
+  ): Promise<{ newCount: number; updatedCount: number }> {
     const moment = window.moment(date, "YYYY-MM-DD");
     let dailyNote = getDailyNote(moment, allDailyNotes);
 
@@ -320,11 +348,12 @@ export class MemosSyncer {
         dailyNote = await createDailyNote(moment);
       } catch (e) {
         new Notice(`Failed to create daily note for ${date}: ${e}`);
-        return 0;
+        return { newCount: 0, updatedCount: 0 };
       }
     }
 
     let newCount = 0;
+    let updatedCount = 0;
     await this.app.vault.process(dailyNote, (content) => {
       const result = modifyDailyNote(
         content,
@@ -338,9 +367,10 @@ export class MemosSyncer {
         return content;
       }
       newCount = result.newCount;
+      updatedCount = result.updatedCount;
       return result.content;
     });
-    return newCount;
+    return { newCount, updatedCount };
   }
 
   private async downloadResources(resources: Resource[]): Promise<void> {

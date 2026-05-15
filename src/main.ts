@@ -66,8 +66,12 @@ export default class MemosSyncPlugin extends Plugin {
 
     try {
       new Notice(`Memos Sync: ${label} started...`);
-      const count = await syncer.sync(forceAll);
-      new Notice(`Memos Sync: ${label} complete. ${count} memo(s) synced.`);
+      const { newCount, updatedCount } = await syncer.sync(forceAll);
+      const parts: string[] = [];
+      if (newCount > 0) parts.push(`${newCount} new`);
+      if (updatedCount > 0) parts.push(`${updatedCount} updated`);
+      const summary = parts.length ? parts.join(", ") : "no changes";
+      new Notice(`Memos Sync: ${label} complete. ${summary}.`);
     } catch (e) {
       console.error("Memos Sync error:", e);
       new Notice(`Memos Sync: ${label} failed. ${e}`);
