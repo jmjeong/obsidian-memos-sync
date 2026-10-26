@@ -92,9 +92,12 @@ shasum -a 256 "$plugin_dir/main.js"
 test "$(shasum -a 256 "$plugin_dir/data.json" | cut -d ' ' -f 1)" = "$settings_sha"
 ```
 
-Reload with Obsidian CLI, or enable/reload the plugin in Obsidian settings:
+Restart Obsidian after replacing the release files to refresh its manifest
+cache, then enable the plugin if needed. Alternatively, use Obsidian CLI to
+refresh the manifests before reloading only this plugin:
 
 ```bash
+obsidian vault=LifeOS eval 'code=(async()=>{await app.plugins.loadManifests();return app.plugins.manifests["memos-sync"].version;})()'
 obsidian vault=LifeOS plugin:reload id=memos-sync
 obsidian vault=LifeOS command id=memos-sync:sync-memos
 ```
