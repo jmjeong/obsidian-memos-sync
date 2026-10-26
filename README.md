@@ -1,10 +1,10 @@
 # Memos Sync for Obsidian
 
-Sync memos from [Memos](https://github.com/usememos/memos) (v0.27.1) to your Obsidian daily notes. One-way sync — Memos → Obsidian.
+Sync memos from [Memos](https://github.com/usememos/memos) to your Obsidian daily notes. One-way sync — Memos → Obsidian.
 
 ## Features
 
-- **Incremental sync** — only fetches new memos since last sync
+- **Incremental sync** — fetches new and edited memos since last sync
 - **Force sync** — re-sync all memos from scratch
 - **Auto sync** — sync on Obsidian startup and/or at a configurable interval
 - **Daily note integration** — inserts memos under a configurable heading (e.g. `## Daily Record`)
@@ -25,7 +25,7 @@ Memos are formatted as list items under the configured heading in your daily not
 - 14:15 - [x] Completed the report #daily-record ^1714029300
 ```
 
-- Time prefix (`HH:mm`) from the memo's display time
+- Time prefix (`HH:mm`) and block ID use the memo's creation time on Memos v0.28+. Legacy v0.27.1 display times remain supported.
 - Task items (`- [ ]`, `- [x]`) are preserved
 - Continuation lines are tab-indented
 - Attachments appear as indented wikilinks or markdown links
@@ -35,17 +35,19 @@ Memos are formatted as list items under the configured heading in your daily not
 
 ### Manual
 
-1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/jmjeong/obsidian-memos-sync/releases)
+1. Download `main.js`, `manifest.json` and `checksums.txt` from the [latest release](https://github.com/jmjeong/obsidian-memos-sync/releases/latest). Verify them with `shasum -a 256 -c checksums.txt`.
 2. Create a folder `memos-sync` in your vault's `.obsidian/plugins/` directory
 3. Copy `main.js` and `manifest.json` into that folder
 4. Restart Obsidian and enable "Memos Sync" in Settings → Community Plugins
+
+For an existing installation, follow the [upgrade guide](docs/memos-0.31-migration.md): back up the plugin files, update `main.js` and `manifest.json`, preserve `data.json`, and reload the plugin. [Release 1.0.1](https://github.com/jmjeong/obsidian-memos-sync/releases/tag/1.0.1) includes the Memos 0.31 compatibility fix.
 
 ### Build from Source
 
 ```bash
 git clone https://github.com/jmjeong/obsidian-memos-sync.git
 cd obsidian-memos-sync
-npm install
+npm ci --registry=https://registry.npmjs.org
 npm run build
 ```
 
@@ -90,14 +92,24 @@ Memos may store images with long storage URLs (e.g. Cloudflare R2 signed URLs). 
 
 ## Commands
 
-- **Sync memos** — incremental sync (new memos since last sync)
+- **Sync memos** — incremental sync (new and edited memos since last sync)
 - **Force sync all memos** — re-fetch and re-sync all memos
 
 ## Compatibility
 
-- **Memos**: v0.27.1 (REST API via gRPC-Gateway)
-- **Obsidian**: 1.5.0+
+- **Memos**: v0.31.0 REST API, with legacy v0.27.1 display-time support. New memos are fetched in `create_time desc` order; edits use `update_time desc`. Attachments are downloaded with the configured access token.
+- **Obsidian**: 1.5.12+
 - Works with the [Periodic Notes](https://github.com/liamcain/obsidian-periodic-notes) plugin for daily note management
+
+## Validation
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+CI runs these checks on pull requests and `main`. To publish a release, update `manifest.json`, `package.json`, both root versions in `package-lock.json`, `versions.json` and `CHANGELOG.md`, then push a tag matching the manifest version exactly (for example, `1.0.1`). The release workflow verifies the metadata, tests and builds the plugin, then publishes `main.js`, `manifest.json` and `checksums.txt`.
 
 ## License
 

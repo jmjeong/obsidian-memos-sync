@@ -242,7 +242,7 @@ export class MemosSyncer {
     fetcher: (pageSize: number, pageToken?: string) => Promise<import("./types").ListMemosResponse>,
     lastSyncTime: number,
     forceAll: boolean,
-    timeField: "displayTime" | "updateTime",
+    timeField: "createTime" | "updateTime",
     memosByDate: Record<string, Record<string, string>>,
     resourcesToDownload: Resource[]
   ): Promise<number> {
@@ -258,9 +258,8 @@ export class MemosSyncer {
       for (const memo of memos) {
         if (memo.state && memo.state !== "NORMAL") continue;
 
-        const timeValue = timeField === "updateTime"
-          ? memo.updateTime
-          : (memo.displayTime || memo.createTime);
+        // The cutoff must use the same field as the API's sort order.
+        const timeValue = memo[timeField];
         const memoTs = window.moment(timeValue).unix();
 
         if (memoTs <= lastSyncTime && !forceAll) {
@@ -300,10 +299,10 @@ export class MemosSyncer {
     const memosByDate: Record<string, Record<string, string>> = {};
     const resourcesToDownload: Resource[] = [];
 
-    // Pass 1: fetch new memos by displayTime
-    const newestDisplayTime = await this.collectMemos(
+    // Pass 1: fetch new memos by createTime (display_time was removed in v0.28).
+    const newestCreateTime = await this.collectMemos(
       (ps, pt) => this.client.listMemos(ps, pt),
-      lastSyncTime, forceAll, "displayTime",
+      lastSyncTime, forceAll, "createTime",
       memosByDate, resourcesToDownload
     );
 
@@ -327,7 +326,7 @@ export class MemosSyncer {
       totalUpdated += result.updatedCount;
     }
 
-    const newestTimestamp = Math.max(newestDisplayTime, newestUpdateTime);
+    const newestTimestamp = Math.max(newestCreateTime, newestUpdateTime);
     if (newestTimestamp > lastSyncTime) {
       this.setLastSyncTime(newestTimestamp);
     }

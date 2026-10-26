@@ -41,7 +41,7 @@ export class MemosClient {
   async listMemos(pageSize: number, pageToken?: string): Promise<ListMemosResponse> {
     const params: Record<string, string> = {
       pageSize: String(pageSize),
-      orderBy: "display_time desc",
+      orderBy: "create_time desc",
     };
     if (pageToken) {
       params.pageToken = pageToken;

@@ -1,9 +1,11 @@
 {
   "name": "memos-sync",
-  "version": "1.0.0",
-  "description": "Sync memos from Memos v0.27.1 to Obsidian daily notes",
+  "version": "1.0.1",
+  "description": "Sync new and edited memos from Memos to Obsidian daily notes",
   "main": "main.js",
   "scripts": {
+    "test": "node --test tests/memos-sync.test.cjs",
+    "typecheck": "tsc --noEmit",
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "deploy": "node esbuild.config.mjs production && cp main.js manifest.json \"$OBSIDIAN_PLUGIN_DIR\""
