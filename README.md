@@ -1,10 +1,10 @@
 # Memos Sync for Obsidian
 
-Sync memos from [Memos](https://github.com/usememos/memos) (v0.27.1) to your Obsidian daily notes. One-way sync — Memos → Obsidian.
+Sync memos from [Memos](https://github.com/usememos/memos) to your Obsidian daily notes. One-way sync — Memos → Obsidian.
 
 ## Features
 
-- **Incremental sync** — only fetches new memos since last sync
+- **Incremental sync** — fetches new and edited memos since last sync
 - **Force sync** — re-sync all memos from scratch
 - **Auto sync** — sync on Obsidian startup and/or at a configurable interval
 - **Daily note integration** — inserts memos under a configurable heading (e.g. `## Daily Record`)
@@ -25,7 +25,7 @@ Memos are formatted as list items under the configured heading in your daily not
 - 14:15 - [x] Completed the report #daily-record ^1714029300
 ```
 
-- Time prefix (`HH:mm`) from the memo's display time
+- Time prefix (`HH:mm`) and block ID use the memo's creation time on Memos v0.28+. Legacy v0.27.1 display times remain supported.
 - Task items (`- [ ]`, `- [x]`) are preserved
 - Continuation lines are tab-indented
 - Attachments appear as indented wikilinks or markdown links
@@ -95,9 +95,19 @@ Memos may store images with long storage URLs (e.g. Cloudflare R2 signed URLs). 
 
 ## Compatibility
 
-- **Memos**: v0.27.1 (REST API via gRPC-Gateway)
+- **Memos**: v0.31.0 REST API, with legacy v0.27.1 display-time support. New memos are fetched in `create_time desc` order; edits use `update_time desc`. Attachments are downloaded with the configured access token.
 - **Obsidian**: 1.5.0+
 - Works with the [Periodic Notes](https://github.com/liamcain/obsidian-periodic-notes) plugin for daily note management
+
+## Validation
+
+```bash
+node --test tests/memos-sync.test.cjs
+npx tsc --noEmit
+npm run build
+```
+
+For an existing installation, follow the [Memos 0.31 migration guide](docs/memos-0.31-migration.md). Preserve `data.json` and use normal sync after reloading the plugin.
 
 ## License
 

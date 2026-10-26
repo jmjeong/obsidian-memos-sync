@@ -39,7 +39,8 @@ export interface Memo {
   creator: string;
   createTime: string;
   updateTime: string;
-  displayTime: string;
+  // Present on v0.27.1; v0.28+ uses createTime instead.
+  displayTime?: string;
   content: string;
   visibility: string;
   tags: string[];
