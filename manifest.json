@@ -1,7 +1,7 @@
 {
 	"id": "memos-sync",
 	"name": "Memos Sync",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"minAppVersion": "1.5.12",
 	"description": "Sync new and edited memos from Memos to Obsidian daily notes via REST API.",
 	"author": "jmjeong",

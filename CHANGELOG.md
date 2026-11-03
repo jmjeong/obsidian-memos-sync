@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] - 2026-11-03
+
+- Support Memos 26.10+ by calling `/api/...`; fall back to `/api/v1/...` on older servers and remember the working prefix.
+- Add a regression test for the fallback.
+
 ## [1.0.1] - 2026-10-26
 
 - Fix HTTP 400 when syncing from Memos 0.31 by replacing the removed `display_time` sort field with `create_time`.

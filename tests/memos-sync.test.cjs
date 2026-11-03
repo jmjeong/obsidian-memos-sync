@@ -176,3 +176,20 @@ test("editing an older memo updates its existing block without duplicating it", 
   assert.match(content, /Edited memo/);
   assert.equal((content.match(/#daily-record/g) || []).length, 1);
 });
+
+test("falls back to /api/v1 on older servers and remembers the prefix", async () => {
+  const urls = [];
+  const { MemosClient } = load("api.ts", {
+    obsidian: {
+      requestUrl: async (req) => {
+        urls.push(new URL(req.url).pathname);
+        if (!req.url.includes("/api/v1/")) throw new Error("404");
+        return { json: { memos: [memo()] } };
+      },
+    },
+  });
+  const client = new MemosClient("https://memos.example", "test-token");
+  await client.listMemos(1);
+  await client.listMemos(1);
+  assert.deepEqual(urls, ["/api/memos", "/api/v1/memos", "/api/v1/memos"]);
+});
