@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3] - 2026-11-28
+
+- Keep non-memo content in the daily section. Sync used to rebuild the section from memo entries only, so callouts, comments and marker blocks written by other tools (e.g. a Garmin summary or `<!-- name:start/end -->` automation blocks) were deleted whenever a memo for that day synced.
+- Replace or insert memo entries in place, in timestamp order. The first memo of a day goes above the first `<!-- name:start -->` block.
+- Fix a stray character leaking into the next section when the header was followed by more than one blank line.
+- Add regression tests for both cases.
+
 ## [1.0.2] - 2026-11-03
 
 - Support Memos 26.10+ by calling `/api/...`; fall back to `/api/v1/...` on older servers and remember the working prefix.

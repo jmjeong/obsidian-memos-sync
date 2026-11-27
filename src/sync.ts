@@ -154,7 +154,36 @@ function generateHeaderRegExp(header: string): RegExp {
   return new RegExp(`(${escapeRegExp(formattedHeader)}[^\n]*)([\\s\\S]*?)(?=\n#|$)`);
 }
 
-// --- Daily note modification (ported from old plugin's DailyNoteModifier) ---
+// --- Daily note modification ---
+//
+// Only memo entries (a "- " line carrying a ^{10-digit} block ID plus its indented
+// continuation lines) are replaced in place or inserted in timestamp order.
+// Everything else in the section (callouts, comments, marker-managed blocks such
+// as <!-- daily-lifelog-agent:start/end -->, hand-written notes) is kept as is.
+// The first memo of a day goes before the first <!-- name:start --> block, so
+// automation blocks stay below the memo list.
+
+const MEMO_ID = /^- .*\^(\d{10})\s*$/;
+const MARKER_START = /^<!--\s*[\w.-]+:start\s*-->\s*$/;
+
+interface MemoEntry {
+  id: string;
+  start: number; // first line index in body
+  end: number; // exclusive
+}
+
+function findMemoEntries(lines: string[]): MemoEntry[] {
+  const entries: MemoEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(MEMO_ID);
+    if (!m) continue;
+    let j = i + 1;
+    while (j < lines.length && /^\s+\S/.test(lines[j])) j++;
+    entries.push({ id: m[1], start: i, end: j });
+    i = j - 1;
+  }
+  return entries;
+}
 
 function modifyDailyNote(
   originContent: string,
@@ -169,43 +198,72 @@ function modifyDailyNote(
   }
 
   const localRecordContent = regMatch[2]?.trim() || "";
-  const from = regMatch.index + regMatch[1].length + 1;
-  const to = from + localRecordContent.length + 1;
-  const prefix = originContent.slice(0, from);
-  const suffix = originContent.slice(to);
+  // Slice by match offsets: offsets derived from the trimmed length shifted by the
+  // number of blank lines under the header and leaked memo characters into the next section.
+  const prefix = originContent.slice(0, regMatch.index + regMatch[1].length);
+  const suffix = originContent.slice(regMatch.index + regMatch[0].length);
 
-  // Parse existing entries by ^{timestamp} block IDs
-  const localRecordList = localRecordContent
-    ? localRecordContent.split(/\n(?=- )/)
-    : [];
-  const existedRecords: Record<string, string> = {};
-  for (const record of localRecordList) {
-    const match = record.match(/.*\^(\d{10})/);
-    if (match?.[1]) {
-      existedRecords[match[1].trim()] = record;
-    }
+  const lines = localRecordContent ? localRecordContent.split("\n") : [];
+  const entries = findMemoEntries(lines);
+  const existing: Record<string, string> = {};
+  for (const e of entries) {
+    if (!(e.id in existing)) existing[e.id] = lines.slice(e.start, e.end).join("\n");
   }
 
-  // Count new and updated memos
   let newCount = 0;
   let updatedCount = 0;
   for (const [key, value] of Object.entries(fetchedRecords)) {
-    if (!(key in existedRecords)) {
-      newCount++;
-    } else if (existedRecords[key] !== value) {
-      updatedCount++;
-    }
+    if (!(key in existing)) newCount++;
+    else if (existing[key] !== value) updatedCount++;
   }
 
-  // Merge: fetched overwrites existing with same timestamp
-  const merged = { ...existedRecords, ...fetchedRecords };
+  // Rebuild the body: replace known entries in place, drop duplicate IDs.
+  const out: string[] = [];
+  const memoLine: boolean[] = [];
+  const placed = new Set<string>();
+  const push = (text: string, isMemo: boolean) => {
+    for (const l of text.split("\n")) {
+      out.push(l);
+      memoLine.push(isMemo);
+    }
+  };
+  let cursor = 0;
+  for (const e of entries) {
+    for (; cursor < e.start; cursor++) push(lines[cursor], false);
+    cursor = e.end;
+    if (placed.has(e.id)) continue;
+    placed.add(e.id);
+    push(fetchedRecords[e.id] ?? lines.slice(e.start, e.end).join("\n"), true);
+  }
+  for (; cursor < lines.length; cursor++) push(lines[cursor], false);
 
-  const sortedContent = Object.entries(merged)
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([, content]) => content)
-    .join("\n");
+  // Insert new memos in timestamp order.
+  const newIds = Object.keys(fetchedRecords)
+    .filter((id) => !placed.has(id))
+    .sort((a, b) => Number(a) - Number(b));
+  for (const id of newIds) {
+    const current = findMemoEntries(out);
+    let at: number;
+    const after = current.find((e) => Number(e.id) > Number(id));
+    if (after) at = after.start;
+    else if (current.length) at = current[current.length - 1].end;
+    else {
+      const marker = out.findIndex((l) => MARKER_START.test(l));
+      at = marker >= 0 ? marker : out.length;
+    }
+    const block = fetchedRecords[id].split("\n");
+    const before = at > 0 ? out[at - 1] : "";
+    const next = at < out.length ? out[at] : "";
+    const ins: string[] = [];
+    if (before.trim() && !(at > 0 && memoLine[at - 1])) ins.push("");
+    ins.push(...block);
+    if (next.trim() && !(at < out.length && memoLine[at])) ins.push("");
+    out.splice(at, 0, ...ins);
+    memoLine.splice(at, 0, ...ins.map((l) => l !== "" || false));
+  }
 
-  const content = prefix.trim() + `\n\n${sortedContent}\n\n` + suffix.trim() + "\n";
+  const body = out.join("\n").trim();
+  const content = prefix.trim() + `\n\n${body}\n\n` + suffix.trim() + "\n";
   return { content, newCount, updatedCount };
 }
 

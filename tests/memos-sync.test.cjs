@@ -80,7 +80,7 @@ test("private attachments retain token authentication and binary data", async ()
   assert.equal(result, bytes);
 });
 
-function syncerWithPages(pages, initialTime = 0) {
+function syncerWithPages(pages, initialTime = 0, initialNote = "## Daily Record\n\n## Personal\n\n- Keep this section.\n") {
   const notes = new Map();
   const state = new Map();
   const requests = [];
@@ -99,7 +99,7 @@ function syncerWithPages(pages, initialTime = 0) {
       getAllDailyNotes: () => ({}),
       getDailyNote: (date) => {
         const name = date.format("YYYY-MM-DD");
-        if (!notes.has(name)) notes.set(name, "## Daily Record\n\n## Personal\n\n- Keep this section.\n");
+        if (!notes.has(name)) notes.set(name, initialNote);
         return { path: name };
       },
     },
@@ -192,4 +192,89 @@ test("falls back to /api/v1 on older servers and remembers the prefix", async ()
   await client.listMemos(1);
   await client.listMemos(1);
   assert.deepEqual(urls, ["/api/memos", "/api/v1/memos", "/api/v1/memos"]);
+});
+
+const LIFELOG_NOTE = [
+  "## Daily Record",
+  "",
+  "> [!health] Garmin Health",
+  "> Steps: 3,478",
+  "",
+  "%%Your Record%%",
+  "",
+  "<!-- daily-lifelog-agent:start -->",
+  "",
+  "- 오늘의 실제 기록: 점심",
+  "- Source: Calendar",
+  "",
+  "<!-- daily-lifelog-agent:end -->",
+  "",
+  "## Work",
+  "",
+  "- Keep this section.",
+  "",
+].join("\n");
+
+function dailyRecord(content) {
+  return content.split("## Work")[0];
+}
+
+test("first memo of a day keeps callouts and lands above marker blocks", async () => {
+  const { syncer, notes } = syncerWithPages({
+    "create_time desc:": { memos: [memo()], nextPageToken: "" },
+  }, 0, LIFELOG_NOTE);
+  const result = await syncer.sync();
+  assert.equal(result.newCount, 1);
+  const section = dailyRecord([...notes.values()][0]);
+  assert.match(section, /> \[!health\] Garmin Health\n> Steps: 3,478\n\n%%Your Record%%\n\n- \d\d:\d\d Example memo #daily-record \^\d{10}\n\n<!-- daily-lifelog-agent:start -->/);
+  assert.match(section, /- 오늘의 실제 기록: 점심\n- Source: Calendar\n\n<!-- daily-lifelog-agent:end -->\n\n$/);
+  assert.match([...notes.values()][0], /## Work\n\n- Keep this section\.\n$/);
+});
+
+test("later memos join the memo list in time order without touching other content", async () => {
+  const first = memo({ createTime: "2026-10-26T01:00:00Z", content: "first" });
+  const third = memo({ name: "memos/third", createTime: "2026-10-26T05:00:00Z", content: "third" });
+  const second = memo({ name: "memos/second", createTime: "2026-10-26T03:00:00Z", content: "second" });
+  const pages = { "create_time desc:": { memos: [third, first], nextPageToken: "" } };
+  const { syncer, notes } = syncerWithPages(pages, 0, LIFELOG_NOTE);
+  await syncer.sync();
+  pages["create_time desc:"].memos = [second];
+  const result = await syncer.sync(true);
+  assert.equal(result.newCount, 1);
+  const section = dailyRecord([...notes.values()][0]);
+  const order = ["first", "second", "third", "daily-lifelog-agent:start"].map((s) => section.indexOf(s));
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+  assert.ok(order.every((i) => i > section.indexOf("Garmin Health")));
+  assert.match(section, /first #daily-record \^\d{10}\n- \d\d:\d\d second #daily-record \^\d{10}\n- \d\d:\d\d third/);
+});
+
+test("editing a multi-line memo replaces all of its lines and keeps the lifelog block", async () => {
+  const original = memo({ content: "headline\nline two\nline three" });
+  const edited = memo({ content: "headline edited\nonly line", updateTime: "2026-10-26T02:00:00Z" });
+  const pages = {
+    "create_time desc:": { memos: [original], nextPageToken: "" },
+    "update_time desc:": { memos: [original], nextPageToken: "" },
+  };
+  const { syncer, notes } = syncerWithPages(pages, 0, LIFELOG_NOTE);
+  await syncer.sync();
+  pages["update_time desc:"].memos = [edited];
+  const result = await syncer.sync();
+  assert.equal(result.updatedCount, 1);
+  const section = dailyRecord([...notes.values()][0]);
+  assert.match(section, /headline edited #daily-record \^\d{10}\n\tonly line\n\n<!-- daily-lifelog-agent:start -->/);
+  assert.doesNotMatch(section, /line two|line three/);
+  assert.match(section, /<!-- daily-lifelog-agent:end -->/);
+  assert.match(section, /Garmin Health/);
+});
+
+test("extra blank lines under the header do not leak memo text into the next section", async () => {
+  const note = "## Daily Record\n\n\n> [!health] Garmin\n- 13:00 old #daily-record ^1779940826\n\t- detail\n\n## Work\n\n- keep\n";
+  const { syncer, notes } = syncerWithPages({
+    "create_time desc:": { memos: [memo()], nextPageToken: "" },
+  }, 0, note);
+  await syncer.sync();
+  const content = [...notes.values()][0];
+  assert.match(content, /\t- detail\n- \d\d:\d\d Example memo #daily-record \^\d{10}\n\n## Work\n\n- keep\n$/);
+  assert.doesNotMatch(content, /^d$/m);
+  assert.match(content, /> \[!health\] Garmin\n- 13:00 old #daily-record \^1779940826\n\t- detail/);
 });
